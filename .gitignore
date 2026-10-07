@@ -1,0 +1,31 @@
+# Runtime state
+logs/
+.*-cache.*.json
+.sdlc-cache.json
+
+# Secrets and per-machine config
+.env
+.env.*
+!.env.example
+.mcp.json
+.claude/settings.local.json
+
+# Your project config; copy projects.example.yaml to start
+/projects.yaml
+/projects.yml
+/projects.json
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

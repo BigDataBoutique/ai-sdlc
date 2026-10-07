@@ -1,0 +1,44 @@
+# Copy to projects.yaml (gitignored) and edit. One block per project; the key is the project id
+# and names its context folder, contexts/<key>/. See docs/new-project.md for every option.
+#
+# env: staging            # optional: environment name for every project in this file
+
+# A GitHub Issues project: stages are labels, the repos hold the issues.
+widgets:
+  name: Widgets
+  forge: {kind: github, org: acme-inc}      # host: github.example.com for GitHub Enterprise
+  tracker:
+    kind: github
+    stage_labels:                           # stage -> label; null = the stage with no label
+      triage: triage
+      design: triage
+      todo: null                            # open and not labeled triage = ready to implement
+    # queue_label: automation               # restrict every pass to issues carrying this label
+    exclude_labels: [question, wontfix]     # never picked up
+    # ready_labels: [[feature, approved], [bug]]   # todo needs every label of one group
+    # triage:                               # turns on triage-issues.sh; needs contexts/<key>/triage.md
+    #   outcomes: [[feature], [bug, approved], [invalid]]
+    #   labels: [help wanted, documentation]
+    #   next: todo
+  repos:
+    widgets: {}
+  # tasks:                                  # extra periodic jobs for sdlc.py
+  #   monitor: {script: scripts/monitor-deploys.sh, every: 10m}   # relative to the context folder
+  #   review: {every: 1h}                   # a built-in's wait between passes
+
+# A Linear project: states are Linear workflow states, repos map to Linear labels.
+shop:
+  name: Shop
+  # context: ../customer-x/shop             # context folder, if not contexts/<key>
+  forge: {kind: github, org: acme-inc}
+  tracker:
+    kind: linear
+    team: ABC                               # team name or key
+    queue_label: Ready for AI               # optional
+    states: {design: Design, todo: Todo, in_progress: In Progress, in_review: In Review, qa: QA}
+    # design_labels: {area: [Billing, Search]}   # labels the design pass may add besides the repo label
+    # blocker_label: Release blocker        # on follow-ups that must land before a release
+  repos:
+    api: {label: API}                       # the Linear label that targets this repo
+    web: {label: Web}
+    infra: {}                               # tracked for review, no ticket automation
