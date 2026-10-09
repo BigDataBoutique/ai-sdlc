@@ -91,18 +91,33 @@ prefix, saves a lookup).
 
 ## Several projects in one instance
 
-Put each project in its own file, or several blocks in one, and list the files in `SDLC_CONFIG`
-(`:`-separated, relative to this folder) or pass `--config` to `tracker.py`. Without either, only
+Put each project in its own file, or several blocks in one, and name the other files in a
+top-level `include:` of `projects.yaml` (relative to the file that includes them), in `SDLC_CONFIG`
+(`:`-separated, relative to this folder) or with `--config` to `tracker.py`. Without any, only
 `projects.yaml` is read.
 
+```yaml
+include: [../customer-x/projects.yaml]   # or a single path; a file is read once, loops are fine
+widgets:
+  ...
+```
+
 ```bash
-SDLC_CONFIG=projects.yaml:../customer-x/projects.yaml ./sdlc.py
+./sdlc.py                                                      # projects.yaml and what it includes
+SDLC_CONFIG=projects.yaml:../customer-x/projects.yaml ./sdlc.py   # the same, from the environment
 ```
 
 - The files are merged by project key. A key in two files must have the same block there, and a
   repo belongs to one project only; either conflict stops every script with the file and key named.
+- `SDLC_CONFIG` can also be a line in `.env`; `include:` is the simpler way for a fixed setup.
 - A relative `context:` (and the `contexts/<key>/` default) resolves against the folder of the
   file that defined the project, so a project kept outside this folder brings its context along.
+  A symlinked file resolves to its real folder: link another hub in as `contexts/<key>.yaml` (its
+  config) and `contexts/<key>` (its context, so the skills it links under `.claude/` find
+  `contexts/<key>/...` from here too) and add `include: [contexts/<key>.yaml]` to `projects.yaml`.
+- Clones are looked for beside that folder (`../<repo>` of the hub that defines the project),
+  or in `repos_root:` (relative to the same folder). `REPOS_ROOT` in the environment overrides
+  it for every project.
 - With several projects and no `SDLC_PROJECT`, each runner runs once per project in turn, with
   its own cache (`.<runner>-cache.<key>.json`) and logs (`logs/<key>/<runner>/`). A runner given a
   ticket id needs `SDLC_PROJECT`. `sdlc.py` gives each project its own `<task>-<key>` rows.

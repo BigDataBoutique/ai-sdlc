@@ -1,7 +1,14 @@
 # Copy to projects.yaml (gitignored) and edit. One block per project; the key is the project id
 # and names its context folder, contexts/<key>/. See docs/new-project.md for every option.
 #
-# env: staging            # optional: environment name for every project in this file
+# A project kept in another hub (its own projects.yaml and contexts/<key>/) joins this instance
+# without a copy: link its files under contexts/ and include the config here:
+#   ln -s ../../other-hub/projects.yaml contexts/<key>.yaml
+#   ln -s ../../other-hub/contexts/<key> contexts/<key>
+# Its context: and clones resolve against the other hub, and sdlc.py shows it as its own group.
+#
+# include: [contexts/<key>.yaml]   # other config files to read, relative to this one
+# env: staging                     # optional: environment name for every project in this file
 
 # A GitHub Issues project: stages are labels, the repos hold the issues.
 widgets:
@@ -30,6 +37,7 @@ widgets:
 shop:
   name: Shop
   # context: ../customer-x/shop             # context folder, if not contexts/<key>
+  # repos_root: ../customer-x               # where its clones live, if not beside this folder
   forge: {kind: github, org: acme-inc}
   tracker:
     kind: linear

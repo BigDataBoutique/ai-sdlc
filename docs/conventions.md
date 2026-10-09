@@ -42,7 +42,8 @@ because it refuses OAuth.
 ## Worktrees, not checkouts
 
 Anything that writes code runs in a git worktree under `$REPOS_ROOT/.worktrees/<ticket-id>/<repo>`
-(`REPOS_ROOT` is the folder holding the clones, by default the parent of this one), never in
+(`REPOS_ROOT` is the folder holding the clones, by default the parent of the hub that defines
+the project, or its `repos_root:`), never in
 the sibling checkout itself: those hold uncommitted work and untracked files such as local
 credentials, which a branch switch can destroy.
 

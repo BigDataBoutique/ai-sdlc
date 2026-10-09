@@ -35,6 +35,8 @@ class YamlSubset(unittest.TestCase):
         ours = tracker.parse_yaml(text)
         self.assertTrue(ours)
         for name, project in ours.items():
+            if name in ("env", "include"):
+                continue
             self.assertIn(project["tracker"]["kind"], ("linear", "github"), name)
             self.assertTrue(project["forge"]["org"] and project["repos"], name)
         try:
@@ -102,7 +104,8 @@ class ConfigAndEnv(unittest.TestCase):
                 self.assertEqual(tracker.pick_project(cfg)[0], "p1")
 
     def test_several_config_files(self):
-        with tempfile.TemporaryDirectory() as d:
+        with tempfile.TemporaryDirectory() as td:
+            d = os.path.realpath(td)
             def write(name, data):
                 path = os.path.join(d, name)
                 os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -117,6 +120,12 @@ class ConfigAndEnv(unittest.TestCase):
             t = tracker.open_tracker("gh", config=cfg)
             self.assertEqual((t.kind, t.org()), ("github", "other"))
             self.assertEqual(t.context_dir(), os.path.join(d, "b", "contexts", "gh"))   # next to its own file
+            self.assertEqual(t.repos_root(), d)                                           # clones beside that folder
+            self.assertIn("REPOS_ROOT=%s\n" % d, t.shell_env())
+            own = tracker.open_tracker("gh", config={"gh": dict(cfg["gh"], repos_root="../clones")})
+            self.assertEqual(own.repos_root(), os.path.join(d, "clones"))
+            with mock.patch.dict(os.environ, {"REPOS_ROOT": "/x"}):
+                self.assertEqual(own.repos_root(), "/x")                                  # the environment wins
             # the same block twice is fine; a different one is a contradiction, named by key path
             self.assertEqual(sorted(tracker.load_config(paths=[lin, write("dup.json", {"lin": LINEAR_CFG})])), ["lin"])
             changed = dict(LINEAR_CFG, tracker=dict(LINEAR_CFG["tracker"], queue_label="Other"))
@@ -136,6 +145,72 @@ class ConfigAndEnv(unittest.TestCase):
             with mock.patch.dict(os.environ, {"SDLC_CONFIG": ""}), mock.patch("sys.stdout") as out:
                 self.assertEqual(tracker.main(["--config", lin, "--config", gh, "config", "projects"]), 0)
                 self.assertIn("lin\ngh", "".join(c.args[0] for c in out.write.call_args_list))
+            # SDLC_CONFIG may sit in .env next to the default file; the environment still wins
+            with open(os.path.join(d, ".env"), "w") as f:
+                f.write("SDLC_CONFIG=%s\n" % os.pathsep.join([lin, gh]))
+            with mock.patch.dict(os.environ, {"SDLC_CONFIG": ""}):
+                self.assertEqual(sorted(tracker.load_config(d)), ["gh", "lin"])
+            with mock.patch.dict(os.environ, {"SDLC_CONFIG": gh}):
+                self.assertEqual(sorted(tracker.load_config(d)), ["gh"])
+
+    def test_include(self):
+        with tempfile.TemporaryDirectory() as td:
+            d = os.path.realpath(td)
+            def write(name, data):
+                path = os.path.join(d, name)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w") as f:
+                    json.dump(data, f)
+                return path
+            other = write("other/projects.json", {"gh": dict(GITHUB_CFG, forge={"kind": "github", "org": "other"}),
+                                                   "include": "projects.json"})   # includes itself: read once
+            main = write("hub/projects.json", {"lin": LINEAR_CFG, "include": ["../other/projects.json"]})
+            cfg = tracker.load_config(paths=[main])
+            self.assertEqual(sorted(cfg), ["gh", "lin"])
+            self.assertEqual(cfg["gh"]["_dir"], os.path.join(d, "other"))   # relative to the including file
+            self.assertEqual(cfg["lin"]["_dir"], os.path.join(d, "hub"))
+            # through a link under contexts/, the included file still resolves to its own folder
+            os.makedirs(os.path.join(d, "hub", "contexts"))
+            try:
+                os.symlink(other, os.path.join(d, "hub", "contexts", "gh.yaml"))
+            except (OSError, NotImplementedError):
+                self.skipTest("no symlinks here")
+            linked = write("hub/linked.json", {"lin": LINEAR_CFG, "include": ["contexts/gh.yaml"]})
+            cfg = tracker.load_config(paths=[linked])
+            self.assertEqual(cfg["gh"]["_dir"], os.path.join(d, "other"))
+            with self.assertRaises(tracker.TrackerError):
+                tracker.load_config(paths=[write("bad.json", {"include": [{"not": "a path"}]})])
+            with self.assertRaises(tracker.TrackerError):
+                tracker.load_config(paths=[write("missing.json", {"include": ["nowhere.json"]})])
+
+    def test_symlinked_config_and_context(self):
+        with tempfile.TemporaryDirectory() as td:
+            d = os.path.realpath(td)
+            os.makedirs(os.path.join(d, "hub", "contexts"))
+            os.makedirs(os.path.join(d, "other", "ai-sdlc"))
+            real = os.path.join(d, "other", "ai-sdlc", "projects.json")
+            cfg = dict(GITHUB_CFG, tracker=dict(GITHUB_CFG["tracker"], stage_labels={"triage": "triage"}, triage={"outcomes": [["bug"]]}))
+            with open(real, "w") as f:
+                json.dump({"gh": cfg}, f)
+            link = os.path.join(d, "hub", "contexts", "gh.yaml")
+            try:
+                os.symlink(real, link)
+            except (OSError, NotImplementedError):
+                self.skipTest("no symlinks here")
+            # a link under contexts/ to another hub's file: that hub stays the project's folder
+            loaded = tracker.load_config(paths=[link])
+            self.assertEqual(loaded["gh"]["_dir"], os.path.join(d, "other", "ai-sdlc"))
+            t = tracker.open_tracker("gh", config=loaded)
+            self.assertEqual(t.context_dir(), os.path.join(d, "other", "ai-sdlc", "contexts", "gh"))
+            self.assertEqual(t.repos_root(), os.path.join(d, "other"))
+            # a symlinked context folder is read through the link
+            ctx = os.path.join(d, "elsewhere", "gh-context")
+            os.makedirs(ctx)
+            open(os.path.join(ctx, "triage.md"), "w").close()
+            os.makedirs(os.path.join(d, "other", "ai-sdlc", "contexts"))
+            os.symlink(ctx, t.context_dir())
+            triage = [x for x in t.tasks() if x["name"] == "triage"][0]
+            self.assertIsNone(triage["skip"])
 
     def test_context_dir(self):
         t = tracker.GitHubTracker("p", GITHUB_CFG, runner=FakeGh({}))

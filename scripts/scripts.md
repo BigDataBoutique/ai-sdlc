@@ -24,7 +24,7 @@ no script names a project, an org or a host:
 |---|---|
 | `TRACKER` | `$ROOT/scripts/tracker.py` |
 | `PROJECT` | the project key, also exported as `SDLC_PROJECT` so sessions and helpers stay on it; `state_file <runner>` gives its cache path |
-| `REPOS_ROOT` | where the clones live; default the parent of `ROOT`, exported. Set it when running from a worktree of ai-sdlc (the worktree's parent is `.worktrees/<id>/`) |
+| `REPOS_ROOT` | where this project's clones live (`tracker.py config repos-root`: the environment, else `repos_root:`, else beside the folder holding the project's config file), exported. Set it when running from a worktree of ai-sdlc (the worktree's parent is `.worktrees/<id>/`) |
 | `NAME`, `ORG`, `HOST` | project name, forge org, forge host (`github.com` unless `forge.host` says otherwise; for another host `GH_HOST` is exported so `gh` follows) |
 | `CONTEXT` | the project's context folder (`context:` in `projects.yaml`, default `contexts/<key>`) |
 | `KIND` | `linear` or `github` |
@@ -39,7 +39,7 @@ no script names a project, an org or a host:
 One command line over the project's ticket tracker, so the runners and skills never need a
 Claude turn (or a hardcoded UUID) to list a queue or move a ticket. The backend, team/repos,
 queue label and stage names come from `../projects.yaml` (`projects.json` with the same shape
-works too), or from the files in `--config` / `SDLC_CONFIG`, merged by project key (a key with two
+works too) and the files its top-level `include:` names, or from the files in `--config` / `SDLC_CONFIG` (environment or `../.env`), merged by project key (a key with two
 different blocks, or a repo in two projects, is an error); names are resolved to IDs at runtime. Stdlib only; PyYAML is used when installed,
 otherwise a built-in parser handles the block subset the file uses.
 
@@ -71,6 +71,7 @@ otherwise a built-in parser handles the block subset the file uses.
 | `name` | display name (`name:`, default the project key) |
 | `org`, `host` | forge org, forge host |
 | `context` | absolute path of the context folder |
+| `repos-root` | absolute path of the folder holding the project's clones |
 | `kind` | `linear` or `github` |
 | `queue-label` | the queue label; empty when there is none |
 | `stages` | `stage<TAB>state name` per line |

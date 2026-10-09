@@ -15,15 +15,16 @@
 #
 #   --list   print every "<repo> <path>" pair found, for debugging a machine's layout
 #
-# Env: REPOS_ROOT overrides where the repos are looked for (default: the parent of ai-sdlc).
+# Env: REPOS_ROOT overrides where the repos are looked for (default: the project's root from
+# `tracker.py config repos-root`: beside the folder holding the config file that defines it).
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 ORG=${ORG:-$("$HERE/tracker.py" config org)}
 HOST=${HOST:-$("$HERE/tracker.py" config host)}
-# Parent of ai-sdlc: where the repos live. Overridable, and pull-all.sh exports it, so the
-# two agree about which root they are resolving against.
-REPOS_ROOT=${REPOS_ROOT:-$(cd "$HERE/../.." && pwd)}
+# Where this project's repos live. env.sh exports it for the runners, so the two agree about
+# which root they are resolving against; standalone, ask the config.
+REPOS_ROOT=${REPOS_ROOT:-$("$HERE/tracker.py" config repos-root)}
 
 # git@github.com:org/name.git and https://github.com/org/name(.git) both -> org/name
 remote_slug() {

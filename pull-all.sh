@@ -24,7 +24,8 @@
 #   ./pull-all.sh            # log also goes to logs/pull-all.log
 #
 # Env:
-#   REPOS_ROOT where the repos live (default: the parent of this folder)
+#   REPOS_ROOT where the repos live (default: per project, see scripts/env.sh; with several
+#              projects env.sh runs this once per project, each against its own root)
 #   REPOS     space-separated repo allowlist (default: the repos in projects.yaml)
 #   DRY_RUN=1 list what would be fetched, fetch nothing
 set -uo pipefail

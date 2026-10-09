@@ -5,16 +5,18 @@ Each task is one of the headless scripts next to this file, run as a single pass
 on its interval (or on a keypress). Their output goes to the screen and to
 logs/sdlc.log. All other env (DRY_RUN, MODEL, CLAUDE_FLAGS, REPOS ...) passes
 through to the scripts, so `DRY_RUN=1 ./sdlc.py` exercises everything for free.
+Which projects load comes from projects.yaml and its `include:` list (or SDLC_CONFIG).
 
 Last finish times and disabled tasks live in .sdlc-cache.json, so a restart
 resumes the schedule instead of running everything again.
 
 Keys: 1-9 run a row now, a/Tab cycle the log view, p pause everything, d enable/disable the task
 in view, k kill (the task in view, or every visible task), q quit, arrows/PgUp/PgDn/End scroll.
-With several environments loaded (a project's `env:`, else its key), each row shows its group,
-e cycles the view between all groups and each one, and P pauses the group in view (or the group
-of the task in view): its tasks stop starting on schedule, run-now still works. Paused groups
-survive restarts in .sdlc-cache.json.
+With several workspaces loaded (a project's `env:`, else its key), a tab bar under the header
+shows `all` and one tab per workspace with its running count; ←/→ or e switch tabs (rows, log and
+keys follow the tab), and P pauses the workspace in view (or the one of the task in view): its
+tasks stop starting on schedule, run-now still works. Paused workspaces survive restarts in
+.sdlc-cache.json.
 
   The tasks come from `scripts/tracker.py config tasks`, per project: the built-ins its config turns
   on (pull, review, update, design, implement, reset, triage) and its own `tasks:` from projects.yaml,
@@ -134,28 +136,30 @@ def main(scr):
     curses.use_default_colors()
     curses.init_pair(1, curses.COLOR_GREEN, -1)
     curses.init_pair(2, curses.COLOR_RED, -1)
+    curses.init_pair(3, curses.COLOR_YELLOW, -1)
     scr.timeout(500)
     tasks = [Task(*t) for t in TASKS]
-    grp = lambda t: t.env_name or t.project  # None = global, shown in every view
-    groups = list(dict.fromkeys(grp(t) for t in tasks if grp(t)))
-    multi = len(groups) > 1
-    gview = None  # None = all groups, else the group shown
-    view = -1  # -1 = all, else index into the visible tasks
+    ws = lambda t: t.env_name or t.project  # None = global (pull), shown in every tab
+    spaces = list(dict.fromkeys(ws(t) for t in tasks if ws(t)))
+    multi = len(spaces) > 1
+    tabs = [None] + spaces  # None = all workspaces
+    tab = None  # the workspace shown
+    view = -1  # -1 = combined log, else index into the visible tasks
     paused = False
     scroll = 0  # lines from the bottom; 0 = follow
     quit_queued = False  # q was pressed once: no new tasks, exit once running ones finish
 
     while True:
         now = time.time()
-        paused_envs = set(state.get("_paused_envs", []))
+        paused_ws = set(state.get("_paused_envs", []))   # the key predates the workspace wording
         if not paused and not quit_queued:
             for t in tasks:
-                if grp(t) not in paused_envs and t.enabled and not t.running and t.next_due is not None and t.next_due <= now:
+                if ws(t) not in paused_ws and t.enabled and not t.running and t.next_due is not None and t.next_due <= now:
                     t.start()
         if quit_queued and not any(t.running for t in tasks):
             return
 
-        shown = [t for t in tasks if gview is None or grp(t) in (None, gview)]
+        shown = [t for t in tasks if tab is None or ws(t) in (None, tab)]
         view = min(view, len(shown) - 1)
         h, w = scr.getmaxyx()
         scr.erase()
@@ -166,21 +170,36 @@ def main(scr):
 
         head = f"SDLC  {os.path.basename(ROOT)}  {'PAUSED' if paused else 'auto'}"
         if multi:
-            head += f"  env: {gview or 'all'}"
-        hold = [g for g in groups if g in paused_envs]
-        if hold:
-            head += "  paused: " + ",".join(hold)
+            head += f"  workspace: {tab or 'all'}"
         put(0, 1, head, curses.A_BOLD)
         put(0, w - 10, time.strftime("%H:%M:%S"))
+
+        top = 1
+        if multi:   # one tab per workspace: its running count, red when a task failed, dim when paused
+            x = 1
+            with lock:
+                for g in tabs:
+                    mine = [t for t in tasks if g is None or ws(t) in (None, g)]
+                    run = sum(t.running for t in mine)
+                    label = f" {g or 'all'}{f' ●{run}' if run else ''}{' ⏸' if g in paused_ws else ''} "
+                    attr = curses.A_REVERSE | curses.A_BOLD if g == tab else 0
+                    if g in paused_ws and g != tab:
+                        attr |= curses.A_DIM
+                    elif any(t.last_exit for t in mine if g is not None or ws(t) is None):
+                        attr |= curses.color_pair(2)
+                    put(top, x, label, attr)
+                    x += len(label) + 1
+            top += 1
+
         nw = max(len(t.name) for t in tasks) + 2 if multi else 10
-        gw = max(len(g) for g in groups) + 2 if multi else 0
+        gw = max(len(g) for g in spaces) + 2 if multi and tab is None else 0
         for i, t in enumerate(shown):
             with lock:
                 if t.running:
                     st, when, attr = "running", f"since {time.strftime('%H:%M', time.localtime(t.started))}", curses.color_pair(1) | curses.A_BOLD
                 elif not t.enabled:
                     st, when, attr = "disabled", "-", curses.A_DIM
-                elif grp(t) in paused_envs:
+                elif ws(t) in paused_ws:
                     st, when, attr = "paused", "-", curses.A_DIM
                 elif t.next_due is None:
                     st, when, attr = "idle", "manual", 0
@@ -189,28 +208,29 @@ def main(scr):
                 ex = "-" if t.last_exit is None else str(t.last_exit)
                 if t.last_exit:
                     attr |= curses.color_pair(2)
-                g = f"{grp(t) or '-':<{gw}}" if multi else ""
-                put(1 + i, 1, f"[{i + 1}] {t.name:<{nw}}{g}{st:<9}{when:<16}exit {ex:<4}{t.last_line}", attr)
+                g = f"{ws(t) or '-':<{gw}}" if gw else ""
+                mark = ">" if i == view else " "
+                put(top + i, 0, f"{mark}[{i + 1:>{2 if len(shown) > 9 else 1}}] {t.name:<{nw}}{g}{st:<9}{when:<16}exit {ex:<4}{t.last_line}", attr)
 
-        sep_y = 1 + len(shown)
+        sep_y = top + len(shown)
         title = "all" if view < 0 else shown[view].name + ("" if shown[view].enabled else " [disabled]")
-        if multi and view < 0 and gview:
-            title += " in " + gview
+        if multi and view < 0 and tab:
+            title += " in " + tab
         put(sep_y, 0, f"── log: {title} " + "─" * w)
 
         with lock:
             if view >= 0:
                 src = list(shown[view].lines)
             else:
-                src = [(stamp, line) for stamp, line, t in combined if gview is None or t in shown]
+                src = [(stamp, line) for stamp, line, t in combined if tab is None or t in shown]
         body_h = h - sep_y - 2
         scroll = min(scroll, max(0, len(src) - body_h))
         end = len(src) - scroll
         for j, (stamp, line) in enumerate(src[max(0, end - body_h):end]):
             put(sep_y + 1 + j, 0, f"{stamp} {line}")
 
-        env_keys = "e env  P pause env  " if multi else ""
-        keys = f"1-{min(len(shown), 9)} run now  a/tab view  {env_keys}p pause  d enable/disable  k kill  q quit  ↑↓ PgUp PgDn scroll  End follow"
+        ws_keys = "←→/e workspace  P pause workspace  " if multi else ""
+        keys = f"1-{min(len(shown), 9)} run now  a/tab view  {ws_keys}p pause  d enable/disable  k kill  q quit  ↑↓ PgUp PgDn scroll  End follow"
         if quit_queued:
             n = sum(t.running for t in tasks)
             keys = (f"exit queued, no new tasks will start: waiting on {n} running "
@@ -237,16 +257,16 @@ def main(scr):
             view = view + 1 if view + 1 < len(shown) else -1
         elif k == ord("p"):
             paused = not paused
-        elif multi and k == ord("e"):
-            cycle = [None] + groups
-            gview = cycle[(cycle.index(gview) + 1) % len(cycle)]
+        elif multi and k in (ord("e"), curses.KEY_RIGHT, curses.KEY_LEFT):
+            step = -1 if k == curses.KEY_LEFT else 1
+            tab = tabs[(tabs.index(tab) + step) % len(tabs)]
             view, scroll = -1, 0
-        elif k == ord("P"):  # with one group loaded, so a pause left by a multi-project run can be undone
-            g = gview or (grp(shown[view]) if view >= 0 else groups[0] if len(groups) == 1 else None)
+        elif k == ord("P"):  # with one workspace loaded too, so a pause left by a multi-project run can be undone
+            g = tab or (ws(shown[view]) if view >= 0 else spaces[0] if len(spaces) == 1 else None)
             if g:
                 with lock:
-                    paused_envs ^= {g}
-                    state["_paused_envs"] = sorted(paused_envs)
+                    paused_ws ^= {g}
+                    state["_paused_envs"] = sorted(paused_ws)
                     save_state()
         elif k == ord("d"):
             if view >= 0:

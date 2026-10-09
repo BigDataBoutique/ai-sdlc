@@ -1,6 +1,7 @@
 This folder (`ai-sdlc`) is the AI SDLC hub: docs, skills and scripts that drive design,
 implementation and review across a project's repos. The repos are **siblings of this folder**
-(`../<repo>`, one git repo each, none nested here) unless `REPOS_ROOT` says otherwise; every
+(`../<repo>`, one git repo each, none nested here) unless `REPOS_ROOT` or the project's
+`repos_root:` says otherwise (a project linked in from another hub keeps that hub's siblings); every
 path here is relative to this folder, and nothing assumes where the parent lives on disk.
 
 The framework is generic. Everything about one project sits in three places: `projects.yaml`

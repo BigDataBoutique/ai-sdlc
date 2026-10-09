@@ -1,6 +1,6 @@
 # Sourced by every runner after it sets ROOT (this folder): reads the project config once and
 # sets what the scripts share. Nothing here names a project, an org or a host.
-#   TRACKER      the ticket CLI            REPOS_ROOT   where the clones live (default: parent of ROOT)
+#   TRACKER      the ticket CLI            REPOS_ROOT   where this project's clones live (env, else `repos_root:`, else beside its config file's folder)
 #   PROJECT      the project key           ENV_NAME     its environment (`env:`), may be empty
 #                                          state_file N  .N-cache.<project>.json, this project's cache
 #   NAME ORG HOST  project name, forge org and host     CONTEXT      the project's docs folder
@@ -9,8 +9,6 @@
 #   QUEUE_ARGS   `--label $QUEUE` or nothing   CLONE_BASE  https://<host>/<org>, where <repo>.git is fetched
 #   MCP_TOOLS    the Linear MCP tool rule, or nothing
 TRACKER="$ROOT/scripts/tracker.py"
-REPOS_ROOT=${REPOS_ROOT:-$(cd "$ROOT/.." && pwd)}   # override when running from a worktree of this folder
-export REPOS_ROOT
 # Several projects and none picked: rerun the calling script once per project, one after the other,
 # looping here when INTERVAL is set; SDLC_ENV narrows that to one environment's projects. A target
 # argument (a ticket, a repo) needs SDLC_PROJECT instead.
@@ -36,6 +34,7 @@ if [ -z "${SDLC_PROJECT:-}" ]; then
 fi
 eval "$("$TRACKER" config env)"
 export SDLC_PROJECT=$PROJECT                          # sessions and helpers stay on this project
+export REPOS_ROOT                                     # per project (tracker.py repos_root); repo-path.sh and sessions resolve against it
 "$ROOT/scripts/prune-logs.sh"                         # old run logs out, at most once a day
 [ "$HOST" = github.com ] || export GH_HOST=$HOST    # gh talks to the project's forge, GitHub Enterprise included
 CLONE_BASE="https://$HOST/$ORG"

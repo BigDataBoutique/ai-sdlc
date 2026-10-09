@@ -5,7 +5,8 @@ One command line over two backends - Linear (GraphQL, personal API key) and GitH
 (`gh api`) - so the runners list queues, move tickets between stages, set labels and
 assignees, and read or create tickets without a Claude session in the loop. Which backend,
 which team or repos, and which labels mean what comes from projects.yaml (or projects.json)
-at the repo root, or from the files in --config / $SDLC_CONFIG, merged; names are resolved
+at the repo root, the files its top-level `include:` names, or the files in --config /
+$SDLC_CONFIG, merged; names are resolved
 to IDs at runtime, so no UUID lives in a script.
 
     tracker.py [--project P] [--json] me
@@ -20,7 +21,7 @@ to IDs at runtime, so no UUID lives in a script.
     tracker.py create --title T (--body TEXT | --body-file F) [--state S] [--label L]... [--repo R] [--cycle current]
     tracker.py append ID (--body TEXT | --body-file F)
     tracker.py setup-labels                                (github only)
-    tracker.py [--config FILE]... config projects|envs|env-name|name|org|host|context|kind|queue-label|stages|repos|ticket-regex|ticket-example|design-labels|blocker-label|env|tasks|triage
+    tracker.py [--config FILE]... config projects|envs|env-name|name|org|host|context|repos-root|kind|queue-label|stages|repos|ticket-regex|ticket-example|design-labels|blocker-label|env|tasks|triage
                       |clone-url R|repo-for-label L|label-for-repo R
     tracker.py howto
 
@@ -36,7 +37,9 @@ blocker, which `block` records through the tracker's own dependency (a GitHub is
 a Linear `blocks` relation) and `get` reports as `blockedBy`.
 
 Env: LINEAR_API_KEY (or the same line in ./.env; https://linear.app/settings/api), SDLC_PROJECT
-(default project when the config holds several), SDLC_CONFIG (config files, `:`-separated), SDLC_ENV (only the projects of that `env:`), DRY_RUN=1 (writes print `would:` and stop).
+(default project when the config holds several), SDLC_CONFIG (config files, `:`-separated, env or ./.env),
+SDLC_ENV (only the projects of that `env:`), REPOS_ROOT (where every project's clones live, overriding
+`repos_root:`), DRY_RUN=1 (writes print `would:` and stop).
 Exit 2 = usage, 1 = the tracker call failed.
 """
 import argparse
@@ -255,10 +258,11 @@ CONFIG_NAMES = ("projects.yaml", "projects.yml", "projects.json")
 
 
 def config_paths(paths=None, root=None):
-    """The project files to read: `paths` (--config), else $SDLC_CONFIG (os.pathsep-separated),
-    else the first projects.yaml|yml|json in `root`. Relative paths are relative to ROOT."""
+    """The project files to read: `paths` (--config), else SDLC_CONFIG (os.pathsep-separated, from
+    the environment or `root`/.env), else the first projects.yaml|yml|json in `root`. Relative paths
+    are relative to ROOT, so a link under contexts/ (contexts/<key>.yaml) works from any cwd."""
     root = root or ROOT
-    paths = paths or [p for p in os.environ.get("SDLC_CONFIG", "").split(os.pathsep) if p]
+    paths = paths or [p for p in (read_env_key("SDLC_CONFIG", root) or "").split(os.pathsep) if p]
     if paths:
         return [os.path.join(ROOT, p) for p in paths]
     for name in CONFIG_NAMES:
@@ -297,15 +301,29 @@ def _first_diff(a, b, at=""):
 
 
 def load_config(root=None, paths=None):
-    """{project: block} merged from every config file. A project may appear in several files
-    only with identical blocks, and a repo may belong to one project only. Each block gets
-    `_dir`, the folder of the file that defined it, which a relative `context:` resolves against."""
-    merged, source = {}, {}
-    for path in config_paths(paths, root):
+    """{project: block} merged from every config file: the ones named, plus what their top-level
+    `include:` lists (a path or a list of paths, relative to the including file's real folder;
+    a file is read once). A project may appear in several files only with identical blocks, and a
+    repo may belong to one project only. Each block gets `_dir`, the real folder of the file that
+    defined it (a symlink is followed, so a link under contexts/ to another hub's file still finds
+    that hub), which a relative `context:` and the default repos root resolve against."""
+    merged, source, seen = {}, {}, set()
+    queue = list(config_paths(paths, root))
+    while queue:
+        path = queue.pop(0)
+        real = os.path.realpath(path)
+        if real in seen:
+            continue
+        seen.add(real)
         data = dict(_read_config(path))
         env = data.pop("env", None)   # a file-level `env: <name>`: the default for its projects
         if env is not None and not isinstance(env, str):
             raise TrackerError("%s: top-level `env` is the file's environment name; a project can't be called env" % path)
+        include = data.pop("include", None) or []
+        include = [include] if isinstance(include, str) else include
+        if not all(isinstance(i, str) for i in include):
+            raise TrackerError("%s: top-level `include` lists other config files; a project can't be called include" % path)
+        queue[:0] = [os.path.join(os.path.dirname(real), i) for i in include]
         for key, block in data.items():
             if env and isinstance(block, dict) and not block.get("env"):
                 block = dict(block, env=env)
@@ -323,7 +341,7 @@ def load_config(root=None, paths=None):
             if r in owner:
                 raise TrackerError("%s belongs to both %r and %r; a repo can be in one project only" % (r, owner[r], key))
             owner[r] = key
-    return {k: dict(b, _dir=os.path.dirname(os.path.abspath(source[k]))) for k, b in merged.items()}
+    return {k: dict(b, _dir=os.path.dirname(os.path.realpath(source[k]))) for k, b in merged.items()}
 
 
 def in_env(config, env=None):
@@ -442,6 +460,15 @@ class Tracker:
         """The folder holding the project's own docs (design, change chains, local dev)."""
         return os.path.join(self.cfg.get("_dir") or ROOT, self.cfg.get("context") or os.path.join("contexts", self.project))
 
+    def repos_root(self):
+        """Where this project's clones live: $REPOS_ROOT (every project, e.g. from a worktree of
+        ai-sdlc), else `repos_root:` relative to the config file's folder, else that folder's parent:
+        the clones sit beside the hub that defines the project."""
+        here = self.cfg.get("_dir") or ROOT
+        if os.environ.get("REPOS_ROOT"):
+            return os.path.abspath(os.environ["REPOS_ROOT"])
+        return os.path.normpath(os.path.join(here, self.cfg.get("repos_root") or ".."))
+
     def clone_url(self, repo):
         return "https://%s/%s/%s.git" % (self.host(), self.org(), repo)
 
@@ -453,7 +480,7 @@ class Tracker:
         """KEY=value lines for scripts/env.sh to eval: everything a runner needs from the config."""
         import shlex
         vals = [("PROJECT", self.project), ("ENV_NAME", self.env_name()), ("NAME", self.display_name()), ("ORG", self.org()), ("HOST", self.host()), ("CONTEXT", self.context_dir()),
-                ("KIND", self.kind), ("QUEUE", self.queue_label), ("BLOCKER", self.blocker_label()),
+                ("REPOS_ROOT", self.repos_root()), ("KIND", self.kind), ("QUEUE", self.queue_label), ("BLOCKER", self.blocker_label()),
                 ("EXAMPLE", self.ticket_example())]
         return "\n".join("%s=%s" % (k, shlex.quote(v)) for k, v in vals)
 
@@ -1250,7 +1277,7 @@ def main(argv=None):
     p.add_argument("--cycle", choices=["current"], help="Linear: put the ticket in the team's active cycle")
     p = add("append"); p.add_argument("id"); p.add_argument("--body"); p.add_argument("--body-file")
     add("setup-labels")
-    p = add("config"); p.add_argument("what", choices=["projects", "name", "org", "host", "context", "kind", "queue-label", "stages", "repos", "ticket-regex", "ticket-example",
+    p = add("config"); p.add_argument("what", choices=["projects", "name", "org", "host", "context", "repos-root", "kind", "queue-label", "stages", "repos", "ticket-regex", "ticket-example",
                                                 "design-labels", "blocker-label", "env", "envs", "env-name", "tasks", "triage", "clone-url", "repo-for-label", "label-for-repo"]); p.add_argument("arg", nargs="?")
     add("howto")
     args = ap.parse_args(argv)
@@ -1322,6 +1349,7 @@ def main(argv=None):
                 "org": lambda: (tr.org(), tr.org()),
                 "host": lambda: (tr.host(),) * 2,
                 "context": lambda: (tr.context_dir(),) * 2,
+                "repos-root": lambda: (tr.repos_root(),) * 2,
                 "kind": lambda: (tr.kind, tr.kind),
                 "queue-label": lambda: (tr.queue_label, tr.queue_label),
                 "ticket-example": lambda: (tr.ticket_example(),) * 2,

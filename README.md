@@ -221,11 +221,13 @@ triage 30m; a project task without `every` waits 1h. `<TASK>_EVERY` in the envir
 both (see [the scheduler](#the-scheduler)).
 
 Other keys: `env` (an environment name, see [several projects](#several-projects-or-environments)),
-`context` (default `contexts/<key>`), `tracker.key` (ticket prefix),
+`context` (default `contexts/<key>`), `repos_root` (where the clones live, default the parent of
+the folder holding the config file), `tracker.key` (ticket prefix),
 `tracker.design_labels` (`{group: [labels]}` the design pass may add), `tracker.ready_labels`
 (GitHub: `[[a, b], [c]]`, a ticket is ready when it has all labels of one group), `tracker.blocker_label`
 (put on follow-ups that must land before a release). Several projects can share one instance:
-put several blocks in one file, or list files in `SDLC_CONFIG`; see
+put several blocks in one file, name other files in a top-level `include:`, or list files in
+`SDLC_CONFIG`; see
 [several projects](docs/new-project.md#several-projects-in-one-instance).
 `./scripts/tracker.py config <what>` prints any resolved setting.
 
@@ -235,11 +237,11 @@ Environment, shared by the runners:
 |---|---|
 | `DRY_RUN=1` | print decisions; no sessions, no cache writes, no tracker writes |
 | `INTERVAL=<sec>` | loop instead of a single pass |
-| `REPOS_ROOT` | where the clones live (default: parent of this folder) |
+| `REPOS_ROOT` | where the clones live, for every project (default: per project, `repos_root:` or beside the folder holding its config file) |
 | `REPOS` | repo allowlist for `review-prs.sh`, `update-prs.sh`, `pull-all.sh` |
 | `MODEL`, `CLAUDE_FLAGS` | session model alias and permission policy; `design-tickets.sh` also `FALLBACK_MODEL` |
 | `ALL_CYCLES=1` | Linear: the whole queue, not just the active cycle |
-| `SDLC_PROJECT`, `SDLC_CONFIG` | pick one project; `:`-separated config files to merge |
+| `SDLC_PROJECT`, `SDLC_CONFIG` | pick one project; `:`-separated config files to merge (`SDLC_CONFIG` may sit in `.env`) |
 | `SDLC_ENV` | only the projects of that environment (`env:`) |
 | `STALE_HOURS`, `STALL_MIN` | stale In Progress threshold (6h); stall timeout for a session (30 min) |
 | `LOG_RETENTION_DAYS`, `LOG_KEEP_LINES` | log pruning (14 days, 20000 lines) |
@@ -257,19 +259,23 @@ and `logs/<project>/<runner>/`.
 
 Runs each task as one pass, then waits its interval (`every`, see [Configuration](#configuration))
 before the next. Every project gets a row per task its config turns on, built-in or its own, run
-with `SDLC_PROJECT` set; with several projects loaded rows are named `<task>-<key>` and show the
-project's environment. `pull` covers all projects and has one row. `<TASK>_EVERY` in seconds
-overrides a row's interval for this run (`REVIEW_EVERY` for the row `review`, `REVIEW_SHOP_EVERY`
-for `review-shop`; `0` = manual only). `SDLC_ENV=prod ./sdlc.py` schedules one environment only.
+with `SDLC_PROJECT` set; with several projects loaded rows are named `<task>-<key>`. `pull` covers
+all projects and has one row. `<TASK>_EVERY` in seconds overrides a row's interval for this run
+(`REVIEW_EVERY` for the row `review`, `REVIEW_SHOP_EVERY` for `review-shop`; `0` = manual only).
+`SDLC_ENV=prod ./sdlc.py` schedules one environment only.
 
-Keys: `1`-`9` run a visible row now, `a`/Tab switch the log view, arrows/PgUp/PgDn/End scroll,
+Keys: `1`-`9` run a visible row now, `a`/Tab switch the log view, ↑/↓/PgUp/PgDn/End scroll,
 `p` pause everything, `d` enable/disable the viewed task, `k` kill it (or every visible task from
 the combined log), `q` quit after running tasks finish (twice to kill them), `x` after `q` to quit
-and leave them running. With several environments loaded (a project's `env:`, else its key), each
-row shows its environment, `e` cycles the view between all and one environment (rows, log and
-keys follow it), and `P` pauses the environment in view: its tasks stop starting on schedule, run
-now still works, and the pause survives restarts. Schedule state survives restarts in
-`.sdlc-cache.json`; output also goes to `logs/sdlc.log`.
+and leave them running.
+
+With several workspaces loaded (a project's `env:`, else its key), a tab bar sits under the
+header: `all`, then one tab per workspace with its running count (`●2`), red when one of its
+tasks last failed and `⏸` when it is paused. ←/→ or `e` switch tabs; the rows, the combined log
+and the `1`-`9` keys follow the tab, and the `all` tab adds a workspace column. `P` pauses the
+workspace in view: its tasks stop starting on schedule, run now still works, and the pause
+survives restarts. Schedule state survives restarts in `.sdlc-cache.json`; output also goes to
+`logs/sdlc.log`.
 
 ### Runners on their own, or from cron
 
@@ -342,7 +348,7 @@ customer-x-eu:
 ```
 
 ```bash
-export SDLC_CONFIG=projects.yaml:../customer-x/projects.json   # ':'-separated, relative to this folder
+export SDLC_CONFIG=projects.yaml:../customer-x/projects.json   # ':'-separated, relative to this folder; or the same line in .env
 ./scripts/tracker.py config projects                           # the merged project keys
 ./sdlc.py                                                      # every project, its own rows per task
 SDLC_PROJECT=customer-x ./review-prs.sh                        # one project
@@ -352,7 +358,8 @@ SDLC_PROJECT=customer-x ./implement-tickets.sh customer-x#12   # a ticket id nee
 ./scripts/tracker.py --config ../customer-x/projects.json --project customer-x list
 ```
 
-- Without `SDLC_CONFIG` or `--config`, only the first `projects.yaml|yml|json` here is read.
+- Without `SDLC_CONFIG` or `--config`, only the first `projects.yaml|yml|json` here is read, plus
+  whatever its `include:` names.
 - Files merge by project key. Reusing a key with a different block, or putting a repo in two
   projects, stops every script and names the file. Give each environment its own key.
 - Caches (`.<runner>-cache.<key>.json`) and logs (`logs/<key>/<runner>/`) are per key, so
@@ -361,7 +368,13 @@ SDLC_PROJECT=customer-x ./implement-tickets.sh customer-x#12   # a ticket id nee
   project kept elsewhere brings its context folder along.
 - `.env` and the `gh` login are shared. For different credentials per environment, export the
   variable (e.g. `LINEAR_API_KEY`) before the run: the environment wins over `.env`.
-- `REPOS_ROOT` is shared too. Set it per run if environments keep their clones elsewhere.
+- Clones are looked for beside the folder holding the file that defined the project (a
+  symlinked file counts as its real one), or in its `repos_root:`. `REPOS_ROOT` in the
+  environment overrides that for every project.
+- Another hub's project can be linked in under `contexts/`: `contexts/<key>.yaml` to its config
+  file and `contexts/<key>` to its context folder, then `include: [contexts/<key>.yaml]` at the
+  top of `projects.yaml` (paths relative to the including file; a file is read once). Then a plain
+  `./sdlc.py` runs every workspace, each as its own group.
 
 Details in [`docs/new-project.md`](docs/new-project.md#several-projects-in-one-instance).
 
