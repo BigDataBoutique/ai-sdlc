@@ -272,7 +272,8 @@ and leave them running.
 With several workspaces loaded (a project's `env:`, else its key), a tab bar sits under the
 header: `all`, then one tab per workspace with its running count (`●2`), red when one of its
 tasks last failed and `⏸` when it is paused. ←/→ or `e` switch tabs; the rows, the combined log
-and the `1`-`9` keys follow the tab, and the `all` tab adds a workspace column. `P` pauses the
+and the `1`-`9` keys follow the tab. The `all` tab adds a workspace column to the rows and tags
+each log line with its workspace, in the tab's colour (the `pull` row, shared by all, is `-`). `P` pauses the
 workspace in view: its tasks stop starting on schedule, run now still works, and the pause
 survives restarts. Schedule state survives restarts in `.sdlc-cache.json`; output also goes to
 `logs/sdlc.log`.

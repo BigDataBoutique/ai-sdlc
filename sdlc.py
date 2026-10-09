@@ -14,7 +14,7 @@ Keys: 1-9 run a row now, a/Tab cycle the log view, p pause everything, d enable/
 in view, k kill (the task in view, or every visible task), q quit, arrows/PgUp/PgDn/End scroll.
 With several workspaces loaded (a project's `env:`, else its key), a tab bar under the header
 shows `all` and one tab per workspace with its running count; ←/→ or e switch tabs (rows, log and
-keys follow the tab), and P pauses the workspace in view (or the one of the task in view): its
+keys follow the tab; the all log tags each line with its workspace in the tab's colour), and P pauses the workspace in view (or the one of the task in view): its
 tasks stop starting on schedule, run-now still works. Paused workspaces survive restarts in
 .sdlc-cache.json.
 
@@ -111,7 +111,7 @@ class Task:
                 f.write(f"{stamp} [{self.name}] {line}\n"); f.flush()
                 with lock:
                     self.lines.append((stamp, line))
-                    combined.append((stamp, f"[{self.name}] {line}", self))
+                    combined.append((stamp, self, f"[{self.name}] {line}"))
                     self.last_line = line
             code = self.proc.wait()
         with lock:
@@ -136,11 +136,14 @@ def main(scr):
     curses.use_default_colors()
     curses.init_pair(1, curses.COLOR_GREEN, -1)
     curses.init_pair(2, curses.COLOR_RED, -1)
-    curses.init_pair(3, curses.COLOR_YELLOW, -1)
     scr.timeout(500)
     tasks = [Task(*t) for t in TASKS]
     ws = lambda t: t.env_name or t.project  # None = global (pull), shown in every tab
     spaces = list(dict.fromkeys(ws(t) for t in tasks if ws(t)))
+    palette = [curses.COLOR_CYAN, curses.COLOR_MAGENTA, curses.COLOR_YELLOW, curses.COLOR_BLUE, curses.COLOR_GREEN]
+    for i, _ in enumerate(spaces):   # one colour per workspace, for its tab and its lines in the all log
+        curses.init_pair(10 + i, palette[i % len(palette)], -1)
+    color = lambda g: curses.color_pair(10 + spaces.index(g)) if g in spaces else curses.A_DIM
     multi = len(spaces) > 1
     tabs = [None] + spaces  # None = all workspaces
     tab = None  # the workspace shown
@@ -182,11 +185,11 @@ def main(scr):
                     mine = [t for t in tasks if g is None or ws(t) in (None, g)]
                     run = sum(t.running for t in mine)
                     label = f" {g or 'all'}{f' ●{run}' if run else ''}{' ⏸' if g in paused_ws else ''} "
-                    attr = curses.A_REVERSE | curses.A_BOLD if g == tab else 0
+                    attr = curses.A_REVERSE | curses.A_BOLD if g == tab else (color(g) if g else 0)
                     if g in paused_ws and g != tab:
                         attr |= curses.A_DIM
                     elif any(t.last_exit for t in mine if g is not None or ws(t) is None):
-                        attr |= curses.color_pair(2)
+                        attr = curses.color_pair(2) | (attr & ~curses.A_COLOR)
                     put(top, x, label, attr)
                     x += len(label) + 1
             top += 1
@@ -220,14 +223,18 @@ def main(scr):
 
         with lock:
             if view >= 0:
-                src = list(shown[view].lines)
+                src = [(stamp, None, line) for stamp, line in shown[view].lines]
             else:
-                src = [(stamp, line) for stamp, line, t in combined if tab is None or t in shown]
+                src = [(stamp, ws(t), line) for stamp, t, line in combined if tab is None or t in shown]
         body_h = h - sep_y - 2
         scroll = min(scroll, max(0, len(src) - body_h))
         end = len(src) - scroll
-        for j, (stamp, line) in enumerate(src[max(0, end - body_h):end]):
-            put(sep_y + 1 + j, 0, f"{stamp} {line}")
+        tag_w = max(len(g) for g in spaces) + 2 if multi and tab is None and view < 0 else 0   # the all log names the workspace
+        for j, (stamp, g, line) in enumerate(src[max(0, end - body_h):end]):
+            put(sep_y + 1 + j, 0, f"{stamp} ")
+            if tag_w:
+                put(sep_y + 1 + j, 9, f"{g or '-':<{tag_w}}", color(g))
+            put(sep_y + 1 + j, 9 + tag_w, line)
 
         ws_keys = "←→/e workspace  P pause workspace  " if multi else ""
         keys = f"1-{min(len(shown), 9)} run now  a/tab view  {ws_keys}p pause  d enable/disable  k kill  q quit  ↑↓ PgUp PgDn scroll  End follow"
