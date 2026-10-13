@@ -61,6 +61,13 @@ trap 'rmdir "$LOCKDIR" 2>/dev/null || true' EXIT
 cache_get() { jq -r --arg k "$1" '.[$k] // {} | "\(.status // "") \(.updatedAt // "")"' "$CACHE"; }
 cache_set() { [ -n "$DRY_RUN" ] && return; jq --arg k "$1" --arg s "$2" --arg u "$3" '.[$k] = {status:$s, updatedAt:$u}' "$CACHE" > "$CACHE.tmp" && mv "$CACHE.tmp" "$CACHE"; }
 
+# This session starts in $ROOT, so the named repo'"'"'s CLAUDE.md goes into the prompt; with no
+# repo named, the session runs the helper for the ones it picks.
+repo_docs() { # repo
+  if [ -n "$1" ]; then "$ROOT/scripts/repo-docs.sh" "$1"
+  else echo "No repo is named: once you know which ones the issue touches, run \`$ROOT/scripts/repo-docs.sh <repo>...\` and read what it prints before validating anything."; fi
+}
+
 triage_prompt() { # identifier url repo dump
   local id=$1 url=$2 repo=$3 dump=$4
   cat <<PROMPT
@@ -69,6 +76,8 @@ You are triaging issue $id ($url) of $NAME. Work unattended; never ask the user 
 $("$TRACKER" howto)
 
 Repo clones live in $REPOS_ROOT; resolve one with \`$ROOT/scripts/repo-path.sh <repo>\` (this issue: ${repo:-no repo named, pick from $("$TRACKER" config repos | paste -sd, -)}). The project docs are in $CONTEXT. Local checkouts may be dirty or behind: read origin's default branch (\`git -C <clone> fetch -q origin\`, then \`git show\` / \`git grep\` on origin/<default>), and run anything that executes code in a worktree: \`git -C <clone> worktree add $REPOS_ROOT/.worktrees/$id-triage/<repo> -b triage-${id//[#]/-} origin/<default>\`. Never edit a clone, never push, never open a PR. Remove the worktree when done.
+
+A repo's own CLAUDE.md and docs/ are the convention source of truth and are not loaded into this session on their own. $(repo_docs "$repo")
 
 Steps:
 1. Read $CONTEXT/README.md and $CONTEXT/triage.md (this project's triage policy: who you act as, what each outcome means, how to write), and any file it tells you to read. Where triage.md and these steps disagree, triage.md wins. The issue and all its comments are at the end of this prompt; follow any linked issue or PR.

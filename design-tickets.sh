@@ -141,12 +141,24 @@ handoff_step() { # identifier
   fi
 }
 
+# The target repos'"'"' CLAUDE.md and docs listing, for the prompt: this session starts in $ROOT, so
+# a repo'"'"'s own CLAUDE.md would never load. $1 is the ticket'"'"'s "./repo ./repo" list; none: say so.
+repo_docs() { # repos
+  local r; r=${1//.\//}
+  if [ -n "$r" ]; then "$ROOT/scripts/repo-docs.sh" $r
+  else echo "(no repo matched: once you know which repos the ticket touches, run \`$ROOT/scripts/repo-docs.sh <repo>...\` and read it before designing)"; fi
+}
+
 design_prompt() { # identifier url repos ticket-dump
   local id=$1 url=$2 repos=$3 dump=$4
   cat <<PROMPT
 You are designing the solution for ticket $id ($url). Goal: find the best design / architecture / solution for the problem stated in the ticket, then update the ticket so it is complete and ready for implementation. Do not write code, and change the ticket's stage only as step 5 says.
 
 Context: the $NAME repos live in $REPOS_ROOT (one git repo per folder, listed in $ROOT/projects.yaml). Target repo(s) for this ticket: ${repos:-none matched - infer them from the ticket}. The project's own docs are in $CONTEXT (design, change chains between repos, local dev): read what applies before designing. A change can span several repos, so look across them when the ticket implies it.
+
+The target repos' own CLAUDE.md and docs/ are the convention source of truth, read from origin's default branch (they are not loaded into this session on their own). Read the docs listed under them that apply, and put both the CLAUDE.md text and the list into the brief of every subagent you spawn:
+
+$(repo_docs "$repos")
 
 $("$TRACKER" howto)
 

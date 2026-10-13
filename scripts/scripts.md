@@ -118,6 +118,11 @@ otherwise a built-in parser handles the block subset the file uses.
   same-named clone of another org or host won't be mistaken for it. Exit 1 and no output when
   there is no clone; callers fall back to reading the PR through `gh`. `--list` dumps every pair
   found, the quickest way to see how a machine is laid out. Looks in `$REPOS_ROOT`.
+- **`repo-docs.sh <repo>... | --path DIR`**: prints each repo's root `CLAUDE.md` in full plus
+  the paths of its other `CLAUDE.md` files and `docs/`, read from origin's default branch (via
+  `gh` when there is no clone). `--path` reads a worktree as it stands. The design, triage and
+  implement runners put it in the prompt, because their sessions start in this folder and the
+  repo's own `CLAUDE.md` would never load.
 - **`awaiting-review.sh [--all]`**: the review queue: PRs requested from you, plus the
   re-reviews you owe (GitHub never re-requests those, so they appear nowhere else). `--all`
   widens it to every open PR in the swept repos you haven't reviewed.

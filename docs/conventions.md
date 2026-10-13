@@ -23,6 +23,13 @@ up.
 A convention asserted from memory is how a review ends up citing a rule the repo dropped
 months ago.
 
+Which sessions load it on their own depends on where they start. `review-prs.sh` and
+`update-prs.sh` run inside a worktree of the repo, so its `CLAUDE.md` loads natively. The design,
+triage and implement sessions start in this folder, so nothing of the repo loads: they get
+`scripts/repo-docs.sh <repo>` output (root `CLAUDE.md` in full plus the other `CLAUDE.md` and
+`docs/` paths, from origin's default branch) in the prompt, and implement passes it on to every
+subagent brief. A new runner that starts in this folder does the same.
+
 ## Sessions carry no memory
 
 A session spawned from here starts from this folder, the repo it works on and the prompt it

@@ -56,6 +56,13 @@ Stages: `design`, `todo`, `in_progress`, `in_review`, `qa`, `discussion`.
   there, with a comment, so a forgotten hand-off costs a pass.
 - Fetch every tracked repo once, up front: for each `<repo> <path>` in
   `./scripts/repo-path.sh --list`, `git -C <path> fetch -q origin`.
+- **Repo docs.** Subagents start in this folder, so a repo's own `CLAUDE.md` and `docs/` are not
+  loaded for them. Run `./scripts/repo-docs.sh <repo>...` once for the candidate repos (it reads
+  origin's default branch and prints each root `CLAUDE.md` in full plus the other `CLAUDE.md` and
+  `docs/` paths) and paste its output into every triage, implementation and verification brief
+  for those repos, telling the subagent to read the listed docs that apply before it designs,
+  edits or judges. Rerun it for a repo triage adds, and use `repo-docs.sh --path <worktree>` for a
+  branch that changed its own docs.
 - **Candidate repos** are the `repos` field of `tracker.py get <ID> --json` (labels mapped through
   `projects.yaml`; on GitHub Issues the repo the issue lives in). A label naming a sibling folder
   also maps to it. Labels are hints: triage decides from the code which repos are touched.
